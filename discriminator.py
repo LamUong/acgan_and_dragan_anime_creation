@@ -37,7 +37,7 @@ class down_sample_block(nn.Module):
         o = self.leaky_relu_1(o)
         return o
 
-class repeated_block(nn.Module)
+class repeated_block(nn.Module):
     def __init__(self, in_chanel, out_chanel, down_sample_kernel, dropRate=0.0):
         super(repeated_block, self).__init__()
         self.down_sample_1 = down_sample_block(in_chanel,down_sample_kernel,out_chanel,2)
@@ -51,7 +51,7 @@ class repeated_block(nn.Module)
         return o
 
 class discriminator(nn.Module):
-	def __init__(self, tags=34):
+    def __init__(self, tags=34):
         super(discriminator, self).__init__()
         self.r_1 = repeated_block(3,32,4)
         self.r_2 = repeated_block(32,64,4)
@@ -71,3 +71,8 @@ class discriminator(nn.Module):
         o = self.d_1(o)
         o = o.view(o.size()[0],-1)
         return self.dense_1(o),self.dense_tags(o)
+'''
+d = discriminator()
+x = Variable(torch.ones(1, 3, 128, 128), requires_grad=True)
+print(d(x))
+'''
