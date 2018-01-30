@@ -8,6 +8,7 @@ from torchvision import transforms, utils
 import pickle
 # Ignore warnings
 import warnings
+import time
 warnings.filterwarnings("ignore")
 class anime_face(Dataset):
     def __init__(self, attr_pickle, image_dir, transform=None):
@@ -38,24 +39,14 @@ class anime_face(Dataset):
         img_name = self.image_dir + self.image_names[idx]
         
         image = io.imread(img_name)
-        
-        output = np.array(self.attr_pickle[self.image_names[idx]])
 
-        sample = {'image': image, 'ouput': output}
+        tags = np.array(self.attr_pickle[self.image_names[idx]]).astype('float')
+        tags = torch.FloatTensor(tags)
 
         if self.transform:
-            sample = self.transform(sample)
+            image = self.transform(image)
 
-        return sample
-class ToTensor(object):
-    """Convert ndarrays in sample to Tensors."""
-    def __call__(self, sample):
-        image, ouput = sample['image'], sample['ouput']
-        # swap color axis because
-        # numpy image: H x W x C
-        # torch image: C X H X W
-        image = image.transpose((2, 0, 1))
-        return {'image': torch.from_numpy(image).float(),
-                'ouput': torch.from_numpy(ouput).float()}
+        return image, tags
+
 
 

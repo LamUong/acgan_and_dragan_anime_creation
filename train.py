@@ -1,4 +1,3 @@
-
 from discriminator import discriminator
 from generator import generator
 from data_loader import *
@@ -8,7 +7,9 @@ import torch
 import torch.nn as nn
 import torch.nn.parallel
 import torch.optim as optim
-from torch.autograd import Variable
+import torchvision.utils as vutils
+from torch.autograd import Variable, grad
+from torchvision.transforms import ToTensor
 at_p='/home/elamuon/paper/tag_detection/illustration2vec/cleaned_image_atrri.p'
 image_dir = '/home/elamuon/paper/tag_detection/illustration2vec/images/clean_resized_image/'
 lambda_adv = 37
@@ -52,17 +53,20 @@ def weights_init(m):
     if isinstance(m, nn.Conv2d) or isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.Linear):
         m.weight.data.normal_(0.0, 0.02)
 
-def noise_sampler():
-    fake_noise = Variable(torch.FloatTensor(batch_size, noise_input_dim)).data.normal_(0, 1).cuda()
+def get_random_numpy_tags_tensor():
     prob=0.25
     tags = list(np.random.choice(2, len(misc),p=[1.0-prob,prob]))+[0 for i in range(len(tag_list)-len(misc))]
     for cat in [sex,hair_type,hair_color,eyes_color]:
         idx = tag_index[random.choice(cat)]
         tags[idx]=1
-    tags = Variable(torch.from_numpy(np.array(tags)).float()).cuda()
+    return torch.from_numpy(np.array(tags)).float().view(1,-1)
+
+def noise_sampler():
+    fake_noise = Variable(torch.FloatTensor(batch_size, noise_input_dim)).cuda()
+    fake_noise.data.normal_(0, 1)
+    tags = torch.cat([get_random_numpy_tags_tensor() for i in range(batch_size)], dim=0)
+    tags = Variable(tags).cuda()
     return fake_noise,tags
-
-
 
 
 labels = Variable(torch.FloatTensor(batch_size,1)).cuda()
@@ -79,14 +83,13 @@ generator_optimizer = torch.optim.Adam(generator.parameters(), lr=learning_rate,
 anime_data = anime_face(at_p,image_dir,transform=transforms.Compose([ToTensor()]))
 data_loader = torch.utils.data.DataLoader(anime_data,
                                              batch_size=batch_size, shuffle=True,
-                                             num_workers=4)
+                                             num_workers=4, drop_last =True)
 criterion = torch.nn.BCEWithLogitsLoss().cuda()
 iterations=0
 for epoch in range(max_epochs):
     adjust_learning_rate(generator_optimizer, iterations)
     adjust_learning_rate(discriminator_optimizer, iterations)
-    for batch_idx, minibatch_data in enumerate(data_loader):
-        image,tags = minibatch_data['image'],minibatch_data['ouput']
+    for batch_idx, (image, tags) in enumerate(data_loader):
         image,tags = Variable(image).cuda(),Variable(tags).cuda()
         #real data training
         discriminator.zero_grad()
@@ -101,7 +104,7 @@ for epoch in range(max_epochs):
 
         #fake data training
         fake_noise,fake_tags = noise_sampler()
-        fake_data = torch.cat((fake_noise, fake_tags), 1)
+        fake_data = torch.cat([fake_noise, fake_tags],dim= 1)
         fake_data = generator(fake_data).detach()
         fake_label_pred, fake_tags_pred = discriminator(fake_data)
         
@@ -112,12 +115,10 @@ for epoch in range(max_epochs):
         fake_loss_sum = lambda_adv*fake_label_loss+fake_tags_loss
         fake_loss_sum.backward()
 
-
-       # gradient penalty
-        alpha = torch.rand(batch_size, 1).expand(X.size())
-        x_hat = Variable(alpha * X.data + (1 - alpha) * (X.data + 0.5 * X.data.std() * torch.rand(X.size())), requires_grad=True)
+        alpha = torch.rand(batch_size,3,128,128).cuda()
+        x_hat = Variable(alpha * image.data + (1 - alpha) * (image.data + 0.5 * image.data.std() * torch.rand(image.size()).cuda()), requires_grad=True)
         pred_hat, tags = discriminator(x_hat)
-        gradients = grad(outputs=pred_hat, inputs=x_hat, grad_outputs=torch.ones(pred_hat.size()),
+        gradients = grad(outputs=pred_hat, inputs=x_hat, grad_outputs=torch.ones(pred_hat.size()).cuda(),
                 create_graph=True, retain_graph=True, only_inputs=True)[0]
         gradient_penalty = lambda_gp * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
         gradient_penalty.backward()
@@ -130,7 +131,7 @@ for epoch in range(max_epochs):
         #train generator
         generator.zero_grad()
         fake_noise,fake_tags = noise_sampler()
-        fake_data = torch.cat((fake_noise, fake_tags), 1)
+        fake_data = torch.cat([fake_noise, fake_tags],dim= 1)
         generated_fake_data = generator(fake_data)
         label_pred, tags_pred = discriminator(generated_fake_data)
         
@@ -144,14 +145,14 @@ for epoch in range(max_epochs):
 
         iterations+=1
 
-        # if print_every:
-        #     print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f'
-        #           % (epoch, max_epochs, batch_idx, len(train_loader),
-        #              loss_d.data[0], loss_g.data[0]))
-
-        #     if batch_idx % 100 == 0:
-        #         vutils.save_image(data,
-        #                 'samples_vanilla/real_samples.png')
-        #         fake = generator(z)
-        #         vutils.save_image(gen.data.view(batch_size, 1, 28, 28),
-        #                 'samples_vanilla/fake_samples_epoch_%03d.png' % epoch)
+        if iterations % 100 == 0:
+            # print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f'
+            #       % (epoch, max_epochs, batch_idx, len(train_loader),
+            #          loss_d.data[0], loss_g.data[0]))
+            vutils.save_image(image.data.view(batch_size, 3, 128, 128),
+                    'samples/real_samples.png')
+            fake_noise,fake_tags = noise_sampler()
+            fake_data = torch.cat([fake_noise, fake_tags], dim= 1)
+            fake = generator(fake_data)
+            vutils.save_image(fake.data.view(batch_size, 3, 128, 128),
+                    'samples/fake_samples_iterations_%03d.png' % iterations)
