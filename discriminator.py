@@ -51,7 +51,7 @@ class repeated_block(nn.Module):
         return o
 
 class discriminator(nn.Module):
-    def __init__(self, tags=34):
+    def __init__(self, tags=37):
         super(discriminator, self).__init__()
         self.r_1 = repeated_block(3,32,4)
         self.r_2 = repeated_block(32,64,4)

@@ -1,33 +1,143 @@
+
+from discriminator import discriminator
+from generator import generator
+from data_loader import *
+import numpy as np
+import random
+
+at_p='/home/elamuon/paper/tag_detection/illustration2vec/cleaned_image_atrri.p'
+image_dir = '/home/elamuon/paper/tag_detection/illustration2vec/images/clean_resized_image/'
+lambda_adv = 37
+lambda_gp = 0.5
+batch_size = 64
+learning_rate=0.0002
+beta_1 = 0.5
+noise_input_dim = 128
+tag_list = [
+'drill hair',
+'twintails',
+ 'ponytail',
+ 'blush',
+ 'smile',
+ 'open mouth',
+ 'hat',
+ 'ribbon',
+ 'glasses',
+ "1girl",
+ "1boy",
+'long hair', 'short hair', 
+'blonde hair', 'brown hair', 'black hair', 'blue hair', 'pink hair', 'purple hair', 'green hair', 'red hair', 'silver hair', 'white hair', 'orange hair', 'aqua hair', 'grey hair',
+'blue eyes', 'red eyes', 'brown eyes', 'green eyes', 'purple eyes', 'yellow eyes', 'pink eyes', 'aqua eyes', 'black eyes', 'orange eyes', 'grey eyes']
+misc = ['drill hair','twintails','ponytail','blush','smile','open mouth','hat','ribbon','glasses']
+sex = ["1girl","1boy"]
+hair_type=['long hair', 'short hair'] 
+hair_color= ['blonde hair', 'brown hair', 'black hair', 'blue hair', 'pink hair', 'purple hair', 'green hair', 'red hair', 'silver hair', 'white hair', 'orange hair', 'aqua hair', 'grey hair']
+eyes_color= ['blue eyes', 'red eyes', 'brown eyes', 'green eyes', 'purple eyes', 'yellow eyes', 'pink eyes', 'aqua eyes', 'black eyes', 'orange eyes', 'grey eyes']
+tag_index = {}
+for i in range(len(tag_list)):
+    tag_index[tag_list[i]] = i
+def adjust_learning_rate(optimizer, iterations):
+    """Sets the learning rate to the initial LR decayed by 10 every 50000 iterations"""
+    lr = args.lr * (0.1 ** (iterations // 50000))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    m.weight.data.normal_(0.0, 0.02)
+
+def noise_sampler():
+    fake_noise = Variable(torch.FloatTensor(batch_size, noise_input_dim)).data.normal_(0, 1).cuda()
+    prob=0.25
+    tags = np.random.choice(2, len(misc),p=[1.0-prob,prob])+[0 for i in range(len(tag_list)-len(misc))]
+    for cat in [sex,hair_type,hair_color,eyes_color]:
+        idx = tag_index[random.choice(cat)]
+        tags[idx]=1
+    tags = Variable(torch.from_numpy(np.array(misc_tags))).cuda()
+    return fake_noise,tags
+
+
+
+
+labels = Variable(torch.FloatTensor(batch_size)).cuda()
+
+generator = generator(tags=37).cuda()
+generator.apply(weights_init)
+
+discriminator = discriminator(tags=37)
+discriminator.apply(weights_init).cuda()
+
+discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=learning_rate, betas=(beta_1, 0.999)).cuda()
+generator_optimizer = torch.optim.Adam(generator.parameters(), lr=learning_rate, betas=(beta_1, 0.999)).cuda()
+
+anime_data = anime_face(at_p,image_dir,transform=transforms.Compose([ToTensor()]))
+dataset_loader = torch.utils.data.DataLoader(anime_data,
+                                             batch_size=batch_size, shuffle=True,
+                                             num_workers=4)
+iterations=0
 for epoch in range(max_epochs):
+    adjust_learning_rate(opt_g, iterations)
+    adjust_learning_rate(opt_d, iterations)
     for batch_idx, minibatch_data in enumerate(data_loader()):
+        image,tags = minibatch_data['image'],minibatch_data['ouput']
+        image,tags = Variable(image).cuda(),Variable(tags).cuda()
         #real data training
         discriminator.zero_grad()
-        real_prediction = discriminator(minibatch_data)
+        real_label_pred, real_tags_pred = discriminator(image)
+
         labels.data.fill_(1.0)
-        real_loss = criterion(pred_real, labels)
-        real_loss.backward()
+
+        real_label_loss = criterion(real_label_pred, labels)
+        real_tags_loss = criterion(real_tags_pred, tags)
+        real_loss_sum = lambda_adv*real_label_loss+real_tags_loss
+        real_loss_sum.backward()
+
+
 
         #fake data training
-        fake_data = noise_sampler()
+        fake_noise,fake_tags = noise_sampler()
+        fake_data = torch.cat((fake_noise, fake_tags), 1)
         fake_data = generator(fake_data).detach()
-        fake_prediction = discriminator(fake_data)
+        fake_label_pred, fake_tags_pred = discriminator(fake_data)
+        
         labels.data.fill_(0.0)
-        fake_loss = criterion(fake_prediction, labels)
-        fake_loss.backward()
+    
+        fake_label_loss = criterion(fake_label_pred, labels)
+        fake_tags_loss = criterion(fake_tags_pred, fake_tags)
+        fake_loss_sum = lambda_adv*fake_label_loss+fake_tags_loss
+        fake_loss_sum.backward()
+
+
+       # gradient penalty
+        alpha = torch.rand(batch_size, 1).expand(X.size())
+        x_hat = Variable(alpha * X.data + (1 - alpha) * (X.data + 0.5 * X.data.std() * torch.rand(X.size())), requires_grad=True)
+        pred_hat, tags = discriminator(x_hat)
+        gradients = grad(outputs=pred_hat, inputs=x_hat, grad_outputs=torch.ones(pred_hat.size()),
+                create_graph=True, retain_graph=True, only_inputs=True)[0]
+        gradient_penalty = lambda_gp * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+        gradient_penalty.backward()
 
         #update discriminator's weights
+        loss_d = real_loss_sum + fake_loss_sum + gradient_penalty
         discriminator_optimizer.step()     
 
 
         #train generator
         generator.zero_grad()
-        gen_input = noise_sampler()
-        generator_fake_data = generator(gen_input)
-        discriminator_prediction = discriminator(generator_fake_data)
+        fake_noise,fake_tags = noise_sampler()
+        fake_data = torch.cat((fake_noise, fake_tags), 1)
+        generated_fake_data = generator(fake_data)
+        label_pred, tags_pred = discriminator(generated_fake_data)
+        
         labels.data.fill_(1.0)
-        generator_loss = criterion(discriminator_prediction, labels) 
+        
+        generator_label_loss = criterion(label_pred, labels) 
+        generator_tags_loss = criterion(fake_tags, tags_pred) 
+        generator_loss = lambda_adv*generator_label_loss+generator_tags_loss
         generator_loss.backward()
         generator_optimizer.step()  
+
+        iterations+=1
 
         # if print_every:
         #     print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f'

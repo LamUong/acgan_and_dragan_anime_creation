@@ -44,7 +44,7 @@ class subpixel_block(nn.Module):
         return o
 
 class generator(nn.Module):
-    def __init__(self, tags=34):
+    def __init__(self, tags=37):
         super(generator, self).__init__()
         self.dense_1 = nn.Linear(128+tags, 16*16*64)
         self.bn_1 = nn.BatchNorm2d(64)
@@ -85,6 +85,6 @@ class generator(nn.Module):
         return o
 '''
 g = generator()
-x = Variable(torch.ones(10, 128+34), requires_grad=True)
+x = Variable(torch.ones(10, 128+37), requires_grad=True)
 print(g(x))
 '''

@@ -57,10 +57,5 @@ class ToTensor(object):
         image = image.transpose((2, 0, 1))
         return {'image': torch.from_numpy(image),
                 'ouput': torch.from_numpy(ouput)}
-at_p='/home/elamuon/paper/tag_detection/illustration2vec/cleaned_image_atrri.p'
-image_dir = '/home/elamuon/paper/tag_detection/illustration2vec/images/clean_resized_image/'
-anime_data = anime_face(at_p,image_dir,transform=transforms.Compose([ToTensor()]))
-dataset_loader = torch.utils.data.DataLoader(anime_data,
-                                             batch_size=4, shuffle=True,
-                                             num_workers=4)
+
 
