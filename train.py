@@ -4,7 +4,11 @@ from generator import generator
 from data_loader import *
 import numpy as np
 import random
-
+import torch
+import torch.nn as nn
+import torch.nn.parallel
+import torch.optim as optim
+from torch.autograd import Variable
 at_p='/home/elamuon/paper/tag_detection/illustration2vec/cleaned_image_atrri.p'
 image_dir = '/home/elamuon/paper/tag_detection/illustration2vec/images/clean_resized_image/'
 lambda_adv = 37
@@ -13,6 +17,7 @@ batch_size = 64
 learning_rate=0.0002
 beta_1 = 0.5
 noise_input_dim = 128
+max_epochs = 20
 tag_list = [
 'drill hair',
 'twintails',
@@ -38,47 +43,49 @@ for i in range(len(tag_list)):
     tag_index[tag_list[i]] = i
 def adjust_learning_rate(optimizer, iterations):
     """Sets the learning rate to the initial LR decayed by 10 every 50000 iterations"""
-    lr = args.lr * (0.1 ** (iterations // 50000))
+    lr = learning_rate * (0.1 ** (iterations // 50000))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
 def weights_init(m):
     classname = m.__class__.__name__
-    m.weight.data.normal_(0.0, 0.02)
+    if isinstance(m, nn.Conv2d) or isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.Linear):
+        m.weight.data.normal_(0.0, 0.02)
 
 def noise_sampler():
     fake_noise = Variable(torch.FloatTensor(batch_size, noise_input_dim)).data.normal_(0, 1).cuda()
     prob=0.25
-    tags = np.random.choice(2, len(misc),p=[1.0-prob,prob])+[0 for i in range(len(tag_list)-len(misc))]
+    tags = list(np.random.choice(2, len(misc),p=[1.0-prob,prob]))+[0 for i in range(len(tag_list)-len(misc))]
     for cat in [sex,hair_type,hair_color,eyes_color]:
         idx = tag_index[random.choice(cat)]
         tags[idx]=1
-    tags = Variable(torch.from_numpy(np.array(misc_tags))).cuda()
+    tags = Variable(torch.from_numpy(np.array(tags)).float()).cuda()
     return fake_noise,tags
 
 
 
 
-labels = Variable(torch.FloatTensor(batch_size)).cuda()
+labels = Variable(torch.FloatTensor(batch_size,1)).cuda()
 
 generator = generator(tags=37).cuda()
 generator.apply(weights_init)
 
-discriminator = discriminator(tags=37)
-discriminator.apply(weights_init).cuda()
+discriminator = discriminator(tags=37).cuda()
+discriminator.apply(weights_init)
 
-discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=learning_rate, betas=(beta_1, 0.999)).cuda()
-generator_optimizer = torch.optim.Adam(generator.parameters(), lr=learning_rate, betas=(beta_1, 0.999)).cuda()
+discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=learning_rate, betas=(beta_1, 0.999))
+generator_optimizer = torch.optim.Adam(generator.parameters(), lr=learning_rate, betas=(beta_1, 0.999))
 
 anime_data = anime_face(at_p,image_dir,transform=transforms.Compose([ToTensor()]))
-dataset_loader = torch.utils.data.DataLoader(anime_data,
+data_loader = torch.utils.data.DataLoader(anime_data,
                                              batch_size=batch_size, shuffle=True,
                                              num_workers=4)
+criterion = torch.nn.BCEWithLogitsLoss().cuda()
 iterations=0
 for epoch in range(max_epochs):
-    adjust_learning_rate(opt_g, iterations)
-    adjust_learning_rate(opt_d, iterations)
-    for batch_idx, minibatch_data in enumerate(data_loader()):
+    adjust_learning_rate(generator_optimizer, iterations)
+    adjust_learning_rate(discriminator_optimizer, iterations)
+    for batch_idx, minibatch_data in enumerate(data_loader):
         image,tags = minibatch_data['image'],minibatch_data['ouput']
         image,tags = Variable(image).cuda(),Variable(tags).cuda()
         #real data training
@@ -91,8 +98,6 @@ for epoch in range(max_epochs):
         real_tags_loss = criterion(real_tags_pred, tags)
         real_loss_sum = lambda_adv*real_label_loss+real_tags_loss
         real_loss_sum.backward()
-
-
 
         #fake data training
         fake_noise,fake_tags = noise_sampler()
