@@ -18,7 +18,7 @@ batch_size = 64
 learning_rate=0.0002
 beta_1 = 0.5
 noise_input_dim = 128
-max_epochs = 20
+max_epochs = 200
 tag_list = [
 'drill hair',
 'twintails',
@@ -143,12 +143,7 @@ for epoch in range(max_epochs):
         generator_loss.backward()
         generator_optimizer.step()  
 
-        iterations+=1
-
         if iterations % 100 == 0:
-            # print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f'
-            #       % (epoch, max_epochs, batch_idx, len(train_loader),
-            #          loss_d.data[0], loss_g.data[0]))
             vutils.save_image(image.data.view(batch_size, 3, 128, 128),
                     'samples/real_samples.png')
             fake_noise,fake_tags = noise_sampler()
@@ -156,3 +151,8 @@ for epoch in range(max_epochs):
             fake = generator(fake_data)
             vutils.save_image(fake.data.view(batch_size, 3, 128, 128),
                     'samples/fake_samples_iterations_%03d.png' % iterations)
+        if iterations % 1000 == 0:    
+            torch.save(generator.state_dict(), str(iterations)+'_generator.pt')
+            torch.save(discriminator.state_dict(), str(iterations)+'_discriminator.pt')
+
+        iterations+=1
