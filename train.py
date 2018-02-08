@@ -18,7 +18,7 @@ learning_rate=0.0002
 beta_1 = 0.5
 noise_input_dim = 128
 max_epochs = 200
-lambda_adv = 29
+lambda_adv = 19
 tag_list = [
  'blush',
  'smile',
@@ -80,7 +80,8 @@ data_loader = torch.utils.data.DataLoader(anime_data,
                                              batch_size=batch_size, shuffle=True,
                                              num_workers=4, drop_last =True)
 
-criterion = torch.nn.BCEWithLogitsLoss().cuda()
+criterion = nn.BCEWithLogitsLoss().cuda()
+multilabel_criterion = nn.MultiLabelSoftMarginLoss().cuda()
 iterations=0
 for epoch in range(max_epochs):
     adjust_learning_rate(g_optimizer, iterations)
@@ -94,7 +95,7 @@ for epoch in range(max_epochs):
         labels.data.fill_(1.0)
 
         real_label_loss = criterion(real_label_pred, labels)
-        real_tags_loss = criterion(real_tags_pred, tags)
+        real_tags_loss = multilabel_criterion(real_tags_pred, tags)
         real_loss_sum = lambda_adv*real_label_loss+real_tags_loss
         real_loss_sum.backward()
 
@@ -107,22 +108,23 @@ for epoch in range(max_epochs):
         labels.data.fill_(0.0)
     
         fake_label_loss = criterion(fake_label_pred, labels)
-        fake_tags_loss = criterion(fake_tags_pred, fake_tags)
+        fake_tags_loss = multilabel_criterion(fake_tags_pred, fake_tags)
         fake_loss_sum = lambda_adv*fake_label_loss+fake_tags_loss
         fake_loss_sum.backward()
 
         shape = [image.size(0)] + [1] * (image.dim() - 1)
         alpha = torch.rand(shape).cuda()
         pertubed_batch = image.data + 0.5 * image.data.std() *torch.rand(image.size()).cuda()
-        differences = (pertubed_batch-image.data)
+        differences = pertubed_batch-image.data
         interpolates = image.data + (alpha*differences)
 
         x_hat = Variable(interpolates, requires_grad=True)
         pred_hat, tags = d(x_hat)
         gradients = grad(outputs=pred_hat, inputs=x_hat, grad_outputs=torch.ones(pred_hat.size()).cuda(),
-                create_graph=True, retain_graph=True, only_inputs=True)[0]
+                create_graph=True, retain_graph=True, only_inputs=True)[0].view(x_hat.size(0),-1)
         gradient_penalty = lambda_gp * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
         gradient_penalty.backward()
+        print(gradient_penalty)
 
         #update discriminator's weights
         loss_d = real_loss_sum + fake_loss_sum + gradient_penalty
@@ -139,7 +141,7 @@ for epoch in range(max_epochs):
         labels.data.fill_(1.0)
         
         generator_label_loss = criterion(label_pred, labels) 
-        generator_tags_loss = criterion(fake_tags, tags_pred) 
+        generator_tags_loss = multilabel_criterion(fake_tags, tags_pred) 
         generator_loss = lambda_adv*generator_label_loss+generator_tags_loss
         generator_loss.backward()
         g_optimizer.step()  
