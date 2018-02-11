@@ -18,7 +18,8 @@ learning_rate=0.0002
 beta_1 = 0.5
 noise_input_dim = 128
 max_epochs = 200
-lambda_adv = 19
+lambda_adv = 10
+lambda_cl = 10
 tag_list = [
  'blush',
  'smile',
@@ -34,8 +35,8 @@ tag_index = {}
 for i in range(len(tag_list)):
     tag_index[tag_list[i]] = i
 
-def save_checkpoint(state, filename='checkpoint.pth.tar'):
-    torch.save(state, filename)
+def save_checkpoint(state, filename='_epoch_checkpoint.pth.tar'):
+    torch.save(state,str(state['epoch']) +filename)
 
 def adjust_learning_rate(optimizer, iterations):
     """Sets the learning rate to the initial LR decayed by 10 every 50000 iterations"""
@@ -96,7 +97,7 @@ for epoch in range(max_epochs):
 
         real_label_loss = criterion(real_label_pred, labels)
         real_tags_loss = multilabel_criterion(real_tags_pred, tags)
-        real_loss_sum = lambda_adv*real_label_loss+real_tags_loss
+        real_loss_sum = lambda_adv*real_label_loss+lambda_cl*real_tags_loss
         real_loss_sum.backward()
 
         #fake data training
@@ -109,7 +110,7 @@ for epoch in range(max_epochs):
     
         fake_label_loss = criterion(fake_label_pred, labels)
         fake_tags_loss = multilabel_criterion(fake_tags_pred, fake_tags)
-        fake_loss_sum = lambda_adv*fake_label_loss+fake_tags_loss
+        fake_loss_sum = lambda_adv*fake_label_loss+lambda_cl*fake_tags_loss
         fake_loss_sum.backward()
 
         shape = [image.size(0)] + [1] * (image.dim() - 1)
@@ -124,10 +125,18 @@ for epoch in range(max_epochs):
                 create_graph=True, retain_graph=True, only_inputs=True)[0].view(x_hat.size(0),-1)
         gradient_penalty = lambda_gp * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
         gradient_penalty.backward()
-        print(gradient_penalty)
+       
 
         #update discriminator's weights
         loss_d = real_loss_sum + fake_loss_sum + gradient_penalty
+        print("discriminator real loss")
+        print(real_loss_sum)
+        print("discriminator fake loss")
+        print(fake_loss_sum)
+        print("discriminator gradient penalty")
+        print(gradient_penalty)
+        print("discriminator total loss")
+        print(loss_d)
         d_optimizer.step()     
 
 
@@ -142,7 +151,9 @@ for epoch in range(max_epochs):
         
         generator_label_loss = criterion(label_pred, labels) 
         generator_tags_loss = multilabel_criterion(fake_tags, tags_pred) 
-        generator_loss = lambda_adv*generator_label_loss+generator_tags_loss
+        print("generator loss")
+        generator_loss = lambda_adv*generator_label_loss+lambda_cl*generator_tags_loss
+        print(generator_loss)
         generator_loss.backward()
         g_optimizer.step()  
 
